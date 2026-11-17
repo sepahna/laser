@@ -4,13 +4,13 @@
 - Appointment duration defaults to 60 minutes and is administrator-configurable.
 - Business hours default to 12:00–22:00.
 - Deposit default: 30% (administrator configurable).
-- Payments: Zarinpal online payment and manual bank transfer with receipt upload/admin review.
-- Confirm only after a verified Zarinpal callback or admin approval of the transfer receipt.
+- Payments in v1: manual bank transfer only, with private receipt upload and admin review. Zarinpal is deferred.
+- Confirm only after admin approval of the bank-transfer receipt.
 - Pending holds expire after a configurable interval.
 - PostgreSQL exclusion constraint prevents overlapping active appointments.
 
 ## Stack
-Next.js App Router + TypeScript + Tailwind CSS; Supabase PostgreSQL/Auth/Storage; Zarinpal server-side integration.
+Next.js App Router + TypeScript + Tailwind CSS; Supabase PostgreSQL/Auth/Storage; server-side booking APIs and manual transfer review.
 
 ## Setup
 1. Create a Supabase project and run `supabase/schema.sql` in SQL Editor.
@@ -20,4 +20,4 @@ Next.js App Router + TypeScript + Tailwind CSS; Supabase PostgreSQL/Auth/Storage
 5. Deploy on a host supporting Next.js server routes. GitHub Pages is static-only and cannot run payment endpoints.
 
 ## Current implementation status
-This repository contains the initial Next.js frontend shell, admin panel shell, Supabase schema draft, and environment template. The UI payment step is explicitly not a live transaction. Production still requires implementing booking API/transactions, auth and role enforcement, receipt upload/review, Zarinpal request+verification callback, hold expiry, and end-to-end tests before accepting real customers/payments.
+This repository contains the initial Next.js frontend shell, admin panel shell, Supabase schema draft, and environment template. The UI payment step is explicitly not a live transaction. Production still requires implementing booking API/transactions, auth and role enforcement, receipt upload/review, hold expiry, and end-to-end tests before accepting real customers/payments.
