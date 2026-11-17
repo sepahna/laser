@@ -1,5 +1,5 @@
--- Avid Beauty laser booking schema
 create extension if not exists pgcrypto;
+create extension if not exists btree_gist;
 create type public.booking_status as enum ('pending_payment','pending_transfer_review','confirmed','cancelled','expired');
 create type public.payment_method as enum ('zarinpal','bank_transfer');
 create table public.profiles (id uuid primary key references auth.users(id) on delete cascade, full_name text not null, phone text unique not null, role text not null default 'customer' check (role in ('customer','admin','staff')), created_at timestamptz not null default now());
@@ -10,24 +10,13 @@ create table public.bookings (id uuid primary key default gen_random_uuid(), tra
 create table public.booking_services (booking_id uuid not null references public.bookings(id) on delete cascade, service_id uuid not null references public.services(id), service_name text not null, price_irr bigint not null, primary key(booking_id,service_id));
 create table public.payments (id uuid primary key default gen_random_uuid(), booking_id uuid not null references public.bookings(id) on delete cascade, method public.payment_method not null, amount_irr bigint not null check(amount_irr>0), status text not null default 'pending' check(status in ('pending','paid','failed','rejected','refunded')), authority text unique, ref_id text, receipt_path text, verified_by uuid references public.profiles(id), verified_at timestamptz, created_at timestamptz not null default now());
 create table public.closures (id uuid primary key default gen_random_uuid(), closed_date date not null unique, reason text);
--- Exclusion constraint prevents overlapping confirmed bookings and active payment holds.
-create extension if not exists btree_gist;
 alter table public.bookings add constraint bookings_no_overlap exclude using gist (tsrange((appointment_date+start_time)::timestamp,(appointment_date+end_time)::timestamp,'[)') with &&) where (status in ('pending_payment','pending_transfer_review','confirmed'));
 create index bookings_date_status_idx on public.bookings(appointment_date,status);
 create index bookings_phone_idx on public.bookings(customer_phone);
 create index payments_booking_idx on public.payments(booking_id,created_at desc);
-
-alter table public.profiles enable row level security;
-alter table public.services enable row level security;
-alter table public.business_settings enable row level security;
-alter table public.bookings enable row level security;
-alter table public.booking_services enable row level security;
-alter table public.payments enable row level security;
-alter table public.closures enable row level security;
+alter table public.profiles enable row level security; alter table public.services enable row level security; alter table public.business_settings enable row level security; alter table public.bookings enable row level security; alter table public.booking_services enable row level security; alter table public.payments enable row level security; alter table public.closures enable row level security;
 create policy "active services are public" on public.services for select using(active);
 create policy "business hours are public" on public.business_settings for select using(true);
 create policy "closures are public" on public.closures for select using(true);
--- Booking and payment mutations intentionally require trusted server-side routes with service-role credentials.
--- Do not create public INSERT/UPDATE policies for bookings or payments.
 create policy "customers read own profile" on public.profiles for select to authenticated using(id=auth.uid());
-create policy "admins manage all" on public.profiles for all to authenticated using(exists(select 1 from public.profiles p where p.id=auth.uid() and p.role='admin')) with check(exists(select 1 from public.profiles p where p.id=auth.uid() and p.role='admin'));
+-- Mutations of bookings/payments and receipt moderation must use authenticated server routes with the service role; do not add public write policies.
