@@ -1,0 +1,33 @@
+-- Avid Beauty laser booking schema
+create extension if not exists pgcrypto;
+create type public.booking_status as enum ('pending_payment','pending_transfer_review','confirmed','cancelled','expired');
+create type public.payment_method as enum ('zarinpal','bank_transfer');
+create table public.profiles (id uuid primary key references auth.users(id) on delete cascade, full_name text not null, phone text unique not null, role text not null default 'customer' check (role in ('customer','admin','staff')), created_at timestamptz not null default now());
+create table public.services (id uuid primary key default gen_random_uuid(), name text not null unique, price_irr bigint not null check(price_irr>=0), duration_minutes integer not null default 60 check(duration_minutes between 15 and 360), active boolean not null default true, sort_order integer not null default 0, created_at timestamptz not null default now());
+create table public.business_settings (id boolean primary key default true check(id), opening_time time not null default '12:00', closing_time time not null default '22:00', default_duration_minutes integer not null default 60 check(default_duration_minutes between 15 and 360), deposit_percent integer not null default 30 check(deposit_percent between 1 and 100), hold_minutes integer not null default 15 check(hold_minutes between 5 and 60), bank_account_holder text, bank_card_number text, bank_iban text, updated_at timestamptz not null default now());
+insert into public.business_settings(id) values(true) on conflict do nothing;
+create table public.bookings (id uuid primary key default gen_random_uuid(), tracking_code text not null unique default ('AV-'||upper(substr(encode(gen_random_bytes(6),'hex'),1,10))), customer_id uuid references public.profiles(id), customer_name text not null, customer_phone text not null, appointment_date date not null, start_time time not null, end_time time not null, duration_minutes integer not null check(duration_minutes>0), total_irr bigint not null check(total_irr>=0), deposit_irr bigint not null check(deposit_irr>=0), payment_method public.payment_method not null, status public.booking_status not null default 'pending_payment', hold_expires_at timestamptz, admin_note text, created_at timestamptz not null default now(), check(end_time>start_time));
+create table public.booking_services (booking_id uuid not null references public.bookings(id) on delete cascade, service_id uuid not null references public.services(id), service_name text not null, price_irr bigint not null, primary key(booking_id,service_id));
+create table public.payments (id uuid primary key default gen_random_uuid(), booking_id uuid not null references public.bookings(id) on delete cascade, method public.payment_method not null, amount_irr bigint not null check(amount_irr>0), status text not null default 'pending' check(status in ('pending','paid','failed','rejected','refunded')), authority text unique, ref_id text, receipt_path text, verified_by uuid references public.profiles(id), verified_at timestamptz, created_at timestamptz not null default now());
+create table public.closures (id uuid primary key default gen_random_uuid(), closed_date date not null unique, reason text);
+-- Exclusion constraint prevents overlapping confirmed bookings and active payment holds.
+create extension if not exists btree_gist;
+alter table public.bookings add constraint bookings_no_overlap exclude using gist (tsrange((appointment_date+start_time)::timestamp,(appointment_date+end_time)::timestamp,'[)') with &&) where (status in ('pending_payment','pending_transfer_review','confirmed'));
+create index bookings_date_status_idx on public.bookings(appointment_date,status);
+create index bookings_phone_idx on public.bookings(customer_phone);
+create index payments_booking_idx on public.payments(booking_id,created_at desc);
+
+alter table public.profiles enable row level security;
+alter table public.services enable row level security;
+alter table public.business_settings enable row level security;
+alter table public.bookings enable row level security;
+alter table public.booking_services enable row level security;
+alter table public.payments enable row level security;
+alter table public.closures enable row level security;
+create policy "active services are public" on public.services for select using(active);
+create policy "business hours are public" on public.business_settings for select using(true);
+create policy "closures are public" on public.closures for select using(true);
+-- Booking and payment mutations intentionally require trusted server-side routes with service-role credentials.
+-- Do not create public INSERT/UPDATE policies for bookings or payments.
+create policy "customers read own profile" on public.profiles for select to authenticated using(id=auth.uid());
+create policy "admins manage all" on public.profiles for all to authenticated using(exists(select 1 from public.profiles p where p.id=auth.uid() and p.role='admin')) with check(exists(select 1 from public.profiles p where p.id=auth.uid() and p.role='admin'));
